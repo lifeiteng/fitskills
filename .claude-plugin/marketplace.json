@@ -1,0 +1,17 @@
+{
+  "name": "fitskills",
+  "owner": { "name": "lifeiteng", "url": "https://github.com/lifeiteng" },
+  "metadata": {
+    "description": "ML and LLM engineering skills by Feiteng Li: bit-exact parity across GPUs and inference engines, and more",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "fitskills",
+      "description": "ML & LLM engineering skills by Feiteng Li: /fit router, bit-exact parity across GPUs and inference engines",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/fit", "./skills/fit-bitexact"]
+    }
+  ]
+}
