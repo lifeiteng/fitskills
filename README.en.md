@@ -49,7 +49,7 @@ Add data or dumped tensors as you get them; no need to retype the command.
 |---|---|
 | [`/fit-bitexact`](skills/fit-bitexact/SKILL.md) | Make the same LLM compute bit-identical results on two implementations: different GPUs, different inference engines, or inference vs training. Proceeds in dependency order: inputs → layer 0 op by op → decode → layer by layer → long records → recover speed. Ships three templates: bitwise compare, dump/replay hooks, GEMM probes |
 
-`fit-bitexact` in practice: DeepSeek V4.1 inference on NVIDIA GPU aligned to Mac Studio (Apple M5 Ultra), compared against a reference implementation: 4 full records, 2.3 billion values, 0 bits differ; after the fixes, prefill got about 2% faster. Full story in the [WeChat article](TBD).
+`fit-bitexact` in practice: DeepSeek V4.1 inference on NVIDIA GPU aligned to Mac Studio (Apple M5 Ultra), compared against a reference implementation: 4 full records, 2.3 billion values, 0 bits differ; after the fixes, prefill got about 2% faster. Full story in the [WeChat article](https://mp.weixin.qq.com/s/9Fvh3UuxGfa8xDVZ1rQEag).
 
 ## Roadmap
 

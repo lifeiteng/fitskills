@@ -49,7 +49,7 @@ npx -y skills add lifeiteng/fitskills -g --all
 |---|---|
 | [`/fit-bitexact`](skills/fit-bitexact/SKILL.md) | 让同一个大模型在两套实现之间逐位算出相同结果。两套实现可以是不同 GPU、不同推理引擎，也可以是推理和训练。按依赖顺序推进：核对输入 → 第 0 层逐算子 → decode → 逐层 → 长记录 → 回收速度。附按位比较、导出与回放钩子、GEMM 探针三个模板 |
 
-`fit-bitexact` 实战：DeepSeek V4.1 对齐 NVIDIA GPU 约 Mac Studio（Apple M5 Ultra）上的推理过程，与参考实现对比，4 条完整记录、共 23 亿个数，0 位不同；修复后 prefill 反而快了约 2%。完整过程见[公众号文章](链接待发布)。
+`fit-bitexact` 实战：DeepSeek V4.1 对齐 NVIDIA GPU 约 Mac Studio（Apple M5 Ultra）上的推理过程，与参考实现对比，4 条完整记录、共 23 亿个数，0 位不同；修复后 prefill 反而快了约 2%。完整过程见[公众号文章](https://mp.weixin.qq.com/s/9Fvh3UuxGfa8xDVZ1rQEag)。
 
 ## 路线图
 
