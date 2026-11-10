@@ -22,7 +22,7 @@ User descriptions are often incomplete. Confirm the following, ask only about wh
 | Two implementations disagree: across GPUs, across engines, between training and inference, or the goal is bit-exact parity | `fit-bitexact` |
 | MoE routing picks different experts on the two sides, or top-k selection is unstable | `fit-bitexact` (start from "discrete selection" and "tie-break") |
 | Things got slower after fixing a numerical issue, and the goal is to recover speed without changing results | `fit-bitexact`, section S6 |
-| Only an external API is called and intermediate results are not visible | No skill. Recommend three things directly: pin inputs and versions, find the first divergence, add the issue to regression tests |
+| Only an external API is called and intermediate results are not visible | No skill. Recommend three things directly: pin inputs and versions, find the first differing observable output (response, generated token, or test case; internal operator divergence cannot be located), add the issue to regression tests |
 | A direction on the roadmap that has not shipped yet | Tell the user plainly "this skill has not been released yet", then give whatever part can be answered directly |
 
 ## Step 3: State the plan before starting

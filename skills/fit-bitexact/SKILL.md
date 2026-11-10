@@ -1,6 +1,6 @@
 ---
 name: fit-bitexact
-description: Hands-on playbook for making the same large model (LLM / MoE) produce bit-identical results on two compute implementations. The two implementations can be different GPUs (e.g., NVIDIA vs. Apple GPU), different engines (e.g., PyTorch vs. vLLM / SGLang / TensorRT-LLM, custom kernels vs. Triton), or an inference vs. a training framework. Proceed in dependency order: input identity → layer 0 op by op → layer by layer → long records → recover speed. Covers how to implement both the target side and the reference side, a comparison script, probe templates, and a root-cause checklist. Use for: cross-GPU or cross-engine numerical parity checks, training/inference consistency (inference and training logits/logprobs disagree), numerical drift between rollout and training in RL, regression checks after quantization or kernel changes, and debugging MoE routing that picks the wrong experts.
+description: Hands-on playbook for making the same large model (LLM / MoE) produce bit-identical results on two compute implementations. The two implementations can be different GPUs (e.g., NVIDIA vs. Apple GPU), different engines (e.g., PyTorch vs. vLLM / SGLang / TensorRT-LLM, custom kernels vs. Triton), or an inference vs. a training framework. Proceed in dependency order: input identity → layer 0 op by op → decode → layer by layer → long sequences → recover speed. Covers how to implement both the target side and the reference side, a comparison script, probe templates, and a root-cause checklist. Use for: cross-GPU or cross-engine numerical parity checks, training/inference consistency (inference and training logits/logprobs disagree), numerical drift between rollout and training in RL, regression checks after quantization or kernel changes, and debugging MoE routing that picks the wrong experts.
 ---
 
 # fit-bitexact: bit-exact LLM parity across GPUs and engines
@@ -14,11 +14,11 @@ description: Hands-on playbook for making the same large model (LLM / MoE) produ
    - Splitting the work between two people lets each catch the other's mistakes: one person who both writes and verifies easily mistakes their own bug for "expected behavior".
 
 Classify each difference before deciding who handles it. The criterion: **does this behavior violate its own declared semantics, or lose precision it should not lose?**
-- **No** — it is inherent hardware behavior or a reasonable design choice, e.g., the pairing order inside matrix units, online softmax, activation quantization for speed, non-IEEE hardware fast functions: the reference side models it.
+- **No** — it is inherent hardware behavior or a reasonable design choice, e.g., the pairing order inside matrix units, online softmax, activation quantization for speed (a bug inside the quantization, e.g., the scale computed via an approximate reciprocal, is still a target-side defect; see references/target-side.md), non-IEEE hardware fast functions: the reference side models it.
 - **Yes** — it is an implementation defect, e.g., truncating where it should round, fast-math dropping a compensation term, an FP16 accumulator rounding after every chunk, the same op following different rules at different sizes: the target side fixes it, and the reference side does not fit the defect.
 - When unsure, escalate to the owner. A fix changes the target side's output and may require re-running evaluations.
 
-**When bit-exactness is not worth pursuing**: when you only call an external API, cannot get intermediate tensors, and cannot see the operator implementations. Three things still carry over: pin inputs and versions, find the first divergence, and add the issues you find to regression tests.
+**When bit-exactness is not worth pursuing**: when you only call an external API, cannot get intermediate tensors, and cannot see the operator implementations. Three things still carry over: pin inputs and versions, find the first differing observable output (response, generated token, or test case), and add the issues you find to regression tests.
 
 ## Roadmap
 
@@ -30,7 +30,7 @@ S1 Input identity  Byte-level check of weights / inputs / parameter dtypes
 S2 Layer 0         Isolate op by op along the data flow: embedding → norm → conversion/RoPE → activation quant → GEMM → attention → routing/experts
 S3 Decode          The T=1 path (GEMV, decode attention); it uses different kernels from prefill
 S4 Layer by layer  1 → 2 → 4 → all layers; look only at the first mismatching layer
-S5 Long records    Several records of varying length, exposing paths short records never reach
+S5 Long sequences  Several records of varying length, exposing paths short sequences never reach
 S6 Recover speed   Only bit-invariant optimizations
 ```
 
@@ -71,7 +71,7 @@ The list below is a **triage priority**, roughly following the data flow. It doe
 3. **Numeric conversion and lookup tables**: whether float→half/bf16 rounds to nearest or truncates, and how the RoPE table is built. A faulty conversion function contaminates nearly every op, so fix it first.
 4. **Activation quantization**: whether the division `scale = 127 / max_abs` is compiled to an approximate reciprocal. A 1-ulp difference flips the quantized codes of the whole row, so this must be aligned before GEMM.
 5. **GEMM**: first list the dispatch table (see reference-side.md), then write a probe for each dispatch path and fit the reduction tree. Also model the order of the dequantization multiplications in the epilogue.
-6. **Transcendental functions**: exp, sigmoid, rsqrt, reciprocal. Use probes to confirm whether the target side uses the exact or the hardware fast version.
+6. **Transcendental and special functions**: exp, sigmoid, rsqrt, reciprocal. Use probes to confirm whether the target side uses the exact or the hardware fast version.
 7. **Attention**: the matrix-unit pairing order for QK and PV, the online softmax denominator, sink.
 8. **Routing and experts**: gate GEMM → scoring → top-k (tie-break) → expert GEMM → activation → weighted combine.
 
@@ -87,10 +87,10 @@ Prefill processes the whole prompt at once, with hundreds to thousands of rows p
   - Some layers use a different weight format or expert count from the others, e.g., one layer in a mixed-quantization model uses another format.
   - Routing ties surface in deep layers only after all earlier layers are bit-exact.
 
-### S5 Long records
-Expand to 4 or more real records, mixing long and short, covering both prefill and decode. Compare all layers, the output-head input, and logits, and also track the per-position top-1 token agreement rate. Long records expose paths short records never reach:
+### S5 Long sequences
+Expand to 4 or more real records, mixing long and short, covering both prefill and decode. Compare all layers, the output-head input, and logits, and also track the per-position top-1 token agreement rate. Long sequences expose paths short sequences never reach:
 - **Split-K that only triggers on full tiles**: short sequences have only edge tiles; once the row count grows, the path switches.
-- **Group counts that change with sequence length**: e.g., the SIMD group count of the indexer top-k varies with T. In short records the number of keys is below k, so all of them are selected and the problem stays hidden.
+- **Group counts that change with sequence length**: e.g., the SIMD group count of the indexer top-k varies with T. In short sequences the number of keys is below k, so all of them are selected and the problem stays hidden.
 - **Individual values from the system math library**: e.g., at certain RoPE positions, macOS libm cosf/sinf differ from glibc.
 
 ### S6 Recover speed after fixes

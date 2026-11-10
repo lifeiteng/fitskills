@@ -3,7 +3,7 @@
 The target side fixes only "implementation defects or precision loss". Code examples are labeled by platform (Metal means Apple GPU, CUDA means NVIDIA GPU); for engines such as PyTorch / vLLM / SGLang, find the corresponding kernel or operator implementation and fix it on the same principles. Inherent hardware behavior is left for the reference side to model. Every fix must come with a test, and after the fix, dump again and hand it to the reference side for re-verification.
 
 ## 1. float → half / bf16 truncates instead of rounding to nearest
-Symptom: the last bit of low-precision outputs is systematically biased toward zero.
+Symptom: the least significant bit of low-precision outputs is systematically biased toward zero.
 Fix: prefer the platform's built-in round-to-nearest conversion over hand-written bit manipulation:
 - CUDA: `__float2half_rn`, `__float2bfloat16_rn`
 - PyTorch: `x.to(torch.float16)`, `x.to(torch.bfloat16)` (both RNE)
@@ -72,7 +72,7 @@ inline void route_token(device const float* logits, uint token, uint lane,
 
 ## 8. Nondeterministic tie-break
 Symptom: when several experts tie, which one is chosen varies with batch size or implementation. For example, MPSGraph top-k picks "larger 5-bit-reversed group index first, then smaller segment index first", while the CPU picks the lowest index. Such problems often surface only in deep layers after all earlier layers are bit-exact.
-Fix: fix the rule to lowest index wins; sum weights serially in slot order; sort output pairs by (expert, token, slot).
+Fix: make lowest index win the tie-break; sum weights serially in slot order; sort output pairs by (expert, token, slot).
 Test: construct tied inputs and verify that T = 1 / 16 / 17 / 100 select the same experts, and that the weights are bit-identical to the single-token case.
 
 ## 9. Testing requirements after a fix

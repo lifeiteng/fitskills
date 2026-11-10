@@ -3,13 +3,13 @@
 ## 1. Target-side implementation defects (fix)
 | Category | Symptom | Fix |
 |---|---|---|
-| Truncating conversion | float→half/bf16 truncates toward zero; the last bit is systematically biased | Round to nearest even (RNE), keep NaN as NaN; test by enumerating all 2^32 floats |
+| Truncating conversion | float→half/bf16 truncates toward zero; the least significant bit is systematically biased | Round to nearest even (RNE), keep NaN as NaN; test by enumerating all 2^32 floats |
 | fast-math reassociation | `acc*a*b` gets reordered; `(1+x)-1` gets folded to `x`, losing the log1p compensation | Local safe/precise math mode + explicit parentheses |
 | fast-math rewritten division | `c/x` compiled to `c*rcp_approx(x)` | Exact division |
-| Approximate transcendentals | exp/sigmoid off by 1–2 ulp | Exact versions (if speed matters, the reference side reproduces them with lookup tables) |
+| Approximate transcendentals (conditional) | exp/sigmoid off by 1–2 ulp | Only a defect if it violates the declared semantics (e.g., the source asks for `precise::exp` but fast-math substitutes the approximation) or loses precision it should not; then use exact versions. If the approximate version is a declared design choice (e.g., for speed), it is not a defect: the reference side models it with lookup tables (section 2) |
 | Low-precision accumulator | FP16 GEMM accumulates in half, rounding per chunk | FP32 accumulation, split-K partial sums added in FP32 in a fixed segment order, a single rounding at the end |
 | relaxed precision | FP32 GEMM truncates mantissas internally | Disable relaxed precision |
-| Dispatch-dependent implementation forks | Different token counts go through different libraries/implementations with different results | All paths share one core function that defines a single order |
+| Dispatch-dependent implementation forks (conditional) | Different token counts go through different libraries/implementations with different results | Only a defect if the op declares one rule for all sizes (e.g., batch invariance, a single tie-break) or a path loses precision; then all paths share one core function that defines a single order. If the separate paths are a declared design choice (e.g., GEMV for decode), the reference side models the dispatch table (section 2) |
 | Nondeterministic tie-break | Which tied element is selected varies with batch size or implementation | Fixed rule (e.g., lower index wins), weights summed serially in fixed slot order |
 
 ## 2. Target-side behaviors the reference side must model (follow)

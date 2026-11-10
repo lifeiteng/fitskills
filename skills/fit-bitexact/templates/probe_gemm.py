@@ -7,9 +7,10 @@ Full workflow:
      Generates probe-MxNxK.a.f16 / .b.f16 (A is MxK, B is KxN, row-major FP16)
   2. Run the GEMM on the target side with the same inputs and write the output to
      OUT_DIR/probe-MxNxK.c.f16 (MxN, FP16)
-  3. python probe_gemm.py fit  OUT_DIR
+  3. python probe_gemm.py fit  OUT_DIR [--allow-missing]
      Prints each candidate's agreement rate per shape. Only a candidate that reaches 100% may go
-     into the reference implementation.
+     into the reference implementation. A missing target-side output is an error (exit 1) unless
+     --allow-missing is given; the verified/expected shape counts are printed at the end.
 
 The candidate reduction trees are only a starting point covering common forms. Determine the real rule
 by reading the target-side source (dispatch, dot pairing, number of split-K segments).
@@ -17,8 +18,8 @@ Computation is row by row: memory is O(N*K), and no (M,N,K) 3-D tensor is materi
 This is a reference-principle implementation for fitting small probes and is slow; for real layers,
 rewrite the reference implementation as a tiled torch/Triton version.
 """
+import argparse
 import os
-import sys
 import numpy as np
 
 SHAPES = [  # (M, N, K)
@@ -50,7 +51,12 @@ def chain(p):
 
 
 def dot4_pairs(p):
-    """Groups of 16 K; within a group pair as (p0+p1)+(p8+p9), (p2+p3)+(p10+p11), ...; results feed the accumulation chain in order."""
+    """Groups of 16 K; within a group pair as (p0+p1)+(p8+p9), (p2+p3)+(p10+p11), ...; results feed the accumulation chain in order.
+    A last group shorter than 16 is zero-padded: adding +0 leaves every nonzero FP32 partial unchanged and at most
+    turns a -0 partial into +0, which the +0-initialized chain does anyway, so the chained result is unchanged."""
+    pad = -p.shape[-1] % 16
+    if pad:
+        p = np.concatenate([p, np.zeros(p.shape[:-1] + (pad,), p.dtype)], -1)
     out = []
     for g in range(0, p.shape[-1], 16):
         q = p[..., g:g + 16]
@@ -105,12 +111,14 @@ CANDIDATES = {
 }
 
 
-def fit(out):
+def fit(out, allow_missing=False):
+    verified = 0
     for M, N, K in SHAPES:
         base = f"{out}/probe-{M}x{N}x{K}"
         if not os.path.exists(base + ".c.f16"):
             print(f"{M}x{N}x{K}: missing target-side output {base}.c.f16, skipping")
             continue
+        verified += 1
         a = np.fromfile(base + ".a.f16", np.float16).reshape(M, K)
         b = np.fromfile(base + ".b.f16", np.float16).reshape(K, N)
         c = np.fromfile(base + ".c.f16", np.float16).reshape(M, N)
@@ -119,9 +127,18 @@ def fit(out):
         best = max(scores, key=scores.get)
         line = "  ".join(f"{k}={v:.4%}" for k, v in scores.items())
         print(f"{M}x{N}x{K}: {line}  -> best={best}{'  (BITEXACT)' if scores[best] == 1.0 else ''}")
+    print(f"verified {verified} / {len(SHAPES)} expected shapes")
+    if verified < len(SHAPES) and not allow_missing:
+        raise SystemExit(f"error: {len(SHAPES) - verified} target-side outputs missing (use --allow-missing to skip them)")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] not in ("gen", "fit"):
-        raise SystemExit("usage: probe_gemm.py gen|fit OUT_DIR")
-    (gen if sys.argv[1] == "gen" else fit)(sys.argv[2])
+    ap = argparse.ArgumentParser()
+    ap.add_argument("cmd", choices=("gen", "fit"))
+    ap.add_argument("out_dir")
+    ap.add_argument("--allow-missing", action="store_true", help="fit: skip shapes without target-side output")
+    args = ap.parse_args()
+    if args.cmd == "gen":
+        gen(args.out_dir)
+    else:
+        fit(args.out_dir, allow_missing=args.allow_missing)

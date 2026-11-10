@@ -11,8 +11,12 @@ Criterion: only identical bit patterns pass (prints BITEXACT). ULP is used only 
 Terminology: ordered-integer distance = map the float bit pattern to an integer so that two adjacent
      representable floats differ by exactly 1. Two numbers n ulps apart have distance n. Both ±0 map
      to 0, so +0 and -0 are at distance 0, but their bit patterns differ and they still count as "different".
+     Zero vs. nonzero counts as same-sign only if the sign bits match (0 vs -1 is opposite_sign).
+
+Exit codes: 0 = bit-exact, 1 = at least one bit differs, 2 = input error (e.g., element counts differ).
 """
 import argparse
+import sys
 import numpy as np
 
 INT = {"f16": np.uint16, "bf16": np.uint16, "f32": np.uint32}
@@ -44,7 +48,9 @@ def main():
     a = np.fromfile(args.target, INT[args.dtype])
     b = np.fromfile(args.reference, INT[args.dtype])
     if a.size != b.size:
-        raise SystemExit(f"element counts differ: {a.size} != {b.size} (first check that shape/dtype/dump refer to the same tensor)")
+        print(f"element counts differ: {a.size} != {b.size} (first check that shape/dtype/dump refer to the same tensor)",
+              file=sys.stderr)
+        return 2
     shape = tuple(int(x) for x in args.shape.split(",")) if args.shape else (a.size,)
     a, b = a.reshape(shape), b.reshape(shape)
 
@@ -53,23 +59,24 @@ def main():
     print(f"elements={a.size} differ={n}")
     if n == 0:
         print("BITEXACT")
-        return
+        return 0
 
     idx = np.argwhere(diff)
     print(f"first_differ_index={tuple(int(i) for i in idx[0])}")
     if a.ndim > 1:
         print(f"rows_differ={len(np.unique(idx[:, 0]))} / {a.shape[0]}")
     w = BITS[args.dtype] // 4
+    fa, fb = to_float(a, args.dtype), to_float(b, args.dtype)
     for i in idx[: args.show]:
         i = tuple(i)
-        print(f"  at {tuple(int(x) for x in i)}: target=0x{int(a[i]):0{w}x} ({float(to_float(a[i], args.dtype))})"
-              f"  reference=0x{int(b[i]):0{w}x} ({float(to_float(b[i], args.dtype))})")
+        print(f"  at {tuple(int(x) for x in i)}: target=0x{int(a[i]):0{w}x} ({float(fa[i])})"
+              f"  reference=0x{int(b[i]):0{w}x} ({float(fb[i])})")
 
-    fa, fb = to_float(a, args.dtype), to_float(b, args.dtype)
-    nan_a, nan_b = np.isnan(fa), np.isnan(fb)
-    finite = ~nan_a & ~nan_b
-    same_sign = (np.signbit(fa) == np.signbit(fb)) | (fa == 0) | (fb == 0)
-    print(f"nan_mismatch={int((nan_a != nan_b).sum())} opposite_sign={int((diff & finite & ~same_sign).sum())}")
+    finite = np.isfinite(fa) & np.isfinite(fb)
+    same_sign = (np.signbit(fa) == np.signbit(fb)) | ((fa == 0) & (fb == 0))
+    print(f"nan_mismatch={int((np.isnan(fa) != np.isnan(fb)).sum())} "
+          f"inf_mismatch={int((diff & (np.isinf(fa) | np.isinf(fb))).sum())} "
+          f"opposite_sign={int((diff & finite & ~same_sign).sum())}")
     sel = diff & finite & same_sign
     ulp = np.abs(ordered(a, BITS[args.dtype]) - ordered(b, BITS[args.dtype]))[sel]
     if ulp.size:
@@ -77,12 +84,16 @@ def main():
         print(f"ulp max={int(ulp.max())} mean={ulp.mean():.3f} "
               f"count[0(±0),1,2,3,4,5,6,7,>=8]={hist.tolist()}")
     err = np.abs(fa - fb)[finite]
-    rms = float(np.sqrt(np.mean(fa[finite] ** 2))) or 1.0
-    print(f"abs max={err.max():.3e} mean={err.mean():.3e} rel_rms={np.sqrt(np.mean(err ** 2)) / rms:.3e}")
+    if err.size:
+        rms = float(np.sqrt(np.mean(fa[finite] ** 2))) or 1.0
+        print(f"abs max={err.max():.3e} mean={err.mean():.3e} rel_rms={np.sqrt(np.mean(err ** 2)) / rms:.3e}")
+    else:
+        print("abs: no element is finite on both sides")
     print("hint: differences concentrated at 1-2 ulp -> most likely a different reduction order or rounding point; "
           "go to S2 and fit with a probe. Large differences, opposite signs, or whole rows differing -> "
           "first check input identity, dtype, dispatch path, and discrete selection (top-k).")
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
